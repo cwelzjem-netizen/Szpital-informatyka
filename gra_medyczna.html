@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gra medyczna — przypisywanie pacjentów</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--muted:#9aa4b2;--accent:#1f8feb;--good:#10b981;--bad:#ef4444}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter, ui-sans-serif, system-ui; background:linear-gradient(180deg,#071124 0%,#081229 100%);color:#e6eef6;min-height:100vh;padding:28px}
+    .wrap{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:430px 1fr;gap:24px}
+    header{grid-column:1/-1;display:flex;justify-content:space-between;margin-bottom:10px}
+    h1{font-size:22px;margin:0}
+    .card{background:rgba(255,255,255,0.04);padding:20px;border-radius:14px;backdrop-filter:blur(6px);box-shadow:0 6px 20px rgba(0,0,0,0.4)}
+
+    .tooltip{position:relative;cursor:help}
+    .tooltip:hover::after{content:attr(data-tip);position:absolute;left:0;top:120%;white-space:nowrap;background:#000a;padding:6px 10px;border-radius:8px;font-size:12px;color:#fff}
+
+    .patient{display:flex;flex-direction:column;gap:16px}
+    .symptoms{background:rgba(255,255,255,0.05);padding:12px;border-radius:8px;color:var(--muted)}
+    .checkbox-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:200px;overflow:auto;padding-right:6px}
+    .checkbox-list label{padding:10px;border-radius:8px;background:rgba(255,255,255,0.03)}
+
+    .panel{display:flex;flex-direction:column;gap:16px}
+    .controls{display:flex;gap:12px;flex-wrap:wrap}
+    .btn{padding:10px 16px;border-radius:10px;border:0;cursor:pointer;font-weight:600}
+    .btn.primary{background:var(--accent);color:#071124}
+    .btn.secondary{background:rgba(255,255,255,0.05);color:var(--muted)}
+    .btn.success{background:var(--good);color:#071124}
+
+    .result{padding:14px;border-radius:10px;background:rgba(255,255,255,0.03)}
+  </style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Gra medyczna — system przypisywania pacjentów</h1>
+  <div style="color:var(--muted);font-size:14px">Rozbudowana wersja</div>
+</header>
+
+<section class="card patient">
+  <div class="meta" style="display:flex;justify-content:space-between">
+      <div>
+        <div style="font-weight:700;font-size:17px" id="patientName">Pacjent</div>
+        <div style="color:var(--muted);font-size:14px" id="patientAge">Wiek: —</div>
+      </div>
+      <div style="color:var(--muted)" id="caseId">#1</div>
+  </div>
+
+  <div>
+    <div style="font-weight:700;margin-bottom:6px">Objawy</div>
+    <div class="symptoms" id="symptoms">—</div>
+  </div>
+
+  <div>
+    <div style="font-weight:700;margin-bottom:6px">Diagnoza wstępna (katalog)</div>
+    <select id="diseaseCatalog" style="width:100%;padding:10px;border-radius:10px;background:#0002;color:#fff;border:1px solid #fff2"></select>
+    <button class="btn secondary" id="applyDisease" style="margin-top:8px;width:100%">Zastosuj sugestię</button>
+  </div>
+
+  <div>
+    <div style="font-weight:700;margin-bottom:6px">Wybrane leki</div>
+    <div class="checkbox-list" id="drugList"></div>
+  </div>
+
+  <div>
+    <div style="font-weight:700;margin-bottom:6px">Badania</div>
+    <div class="checkbox-list" id="testList"></div>
+  </div>
+</section>
+
+<aside class="card panel">
+  <div>
+    <div style="font-weight:700;margin-bottom:8px">Oddział i lekarz</div>
+    <select id="department" style="width:100%;padding:10px;border-radius:10px;background:#0002;color:#fff;border:1px solid #fff2;margin-bottom:8px"></select>
+    <select id="doctor" style="width:100%;padding:10px;border-radius:10px;background:#0002;color:#fff;border:1px solid #fff2"></select>
+  </div>
+
+  <div>
+    <div style="font-weight:700;margin-bottom:8px">Akcje</div>
+    <div class="controls">
+      <button class="btn primary" id="checkBtn">Sprawdź</button>
+      <button class="btn secondary" id="nextBtn">Następny pacjent</button>
+      <button class="btn secondary" id="revealBtn">Pokaż diagnozę</button>
+    </div>
+  </div>
+
+  <div>
+    <div style="font-weight:700;margin-bottom:8px">Wynik</div>
+    <div id="resultBox" class="result">Wciśnij „Sprawdź”.</div>
+  </div>
+</aside>
+</div>
+
+<script>
+const cases=[
+  {id:1,name:"Jan Kowalski",age:58,symptoms:"Gorączka, kaszel, duszność",correctDepartment:"Pulmonologia",correctDoctor:"Dr Nowak",correctTests:["RTG klatki piersiowej"],correctDrugs:["Antybiotyk"],diagnosis:"Zapalenie płuc"},
+  {id:2,name:"Maria Nowicka",age:44,symptoms:"Ból w klatce piersiowej, zimne poty",correctDepartment:"Kardiologia",correctDoctor:"Dr Wiśniewski",correctTests:["EKG"],correctDrugs:["Aspiryna"],diagnosis:"Zawał serca"},
+  {id:3,name:"Ola Lewicka",age:19,symptoms:"Zmiany skórne, swędzenie",correctDepartment:"Dermatologia",correctDoctor:"Dr Zawadzka",correctTests:["Wymaz dermatologiczny"],correctDrugs:["Maść dermatologiczna"],diagnosis:"Łuszczyca"},
+  {id:4,name:"Karol Zając",age:67,symptoms:"Drżenie rąk, bóle nerwowe",correctDepartment:"Neurologia",correctDoctor:"Dr Lewandowska",correctTests:["Rezonans magnetyczny"],correctDrugs:["Lek neurologiczny"],diagnosis:"Neuralgia"},
+  {id:5,name:"Ewelina Lis",age:52,symptoms:"Zmęczenie, tycie, uczucie zimna",correctDepartment:"Endokrynologia",correctDoctor:"Dr Kamińska",correctTests:["Badanie hormonalne TSH"],correctDrugs:["Insulina"],diagnosis:"Niedoczynność tarczycy"}
+];
+
+const departments=["Pulmonologia","Gastroenterologia","Kardiologia","Neurologia","Ortopedia","Dermatologia","Endokrynologia"]; const doctorInfo={"Dr Nowak":"Pulmonolog","Dr Kowalczyk":"Gastroenterolog","Dr Wiśniewski":"Kardiolog","Dr Lewandowska":"Neurolog","Dr Majewski":"Ortopeda","Dr Zawadzka":"Dermatolog","Dr Kamińska":"Endokrynolog"};
+const tests=["RTG klatki piersiowej","USG brzucha","EKG","Tomografia komputerowa","Rezonans magnetyczny","Badanie krwi — morfologia","Badanie hormonalne TSH","Wymaz dermatologiczny"]; const drugs=[
+  {name:"Antybiotyk",info:"Leczy infekcje bakteryjne"},
+  {name:"Lek przeciwwymiotny",info:"Zmniejsza nudności i wymioty"},
+  {name:"Aspiryna",info:"Rozrzedza krew, przeciwbólowy"},
+  {name:"Środek przeciwzapalny",info:"Zmniejsza stany zapalne"},
+  {name:"Steryd",info:"Silne działanie przeciwzapalne"},
+  {name:"Lek neurologiczny",info:"Na bóle i zaburzenia neurologiczne"},
+  {name:"Maść dermatologiczna",info:"Leczy zmiany skórne"},
+  {name:"Insulina",info:"Reguluje poziom cukru"}
+];
+const diseaseCatalog=[
+  {name:"Zapalenie płuc",drugs:["Antybiotyk"],tests:["RTG klatki piersiowej"]},
+  {name:"Zawał serca",drugs:["Aspiryna"],tests:["EKG"]},
+  {name:"Niedoczynność tarczycy",drugs:["Insulina"],tests:["Badanie hormonalne TSH"]},
+  {name:"Neuralgia",drugs:["Lek neurologiczny"],tests:["Rezonans magnetyczny"]},
+  {name:"Łuszczyca",drugs:["Maść dermatologiczna"],tests:["Wymaz dermatologiczny"]}
+];
+
+let idx=0;let selectedTests=new Set();let selectedDrugs=new Set();
+
+const patientNameEl=document.getElementById('patientName');
+const patientAgeEl=document.getElementById('patientAge');
+const symptomsEl=document.getElementById('symptoms');
+const caseIdEl=document.getElementById('caseId');
+const departmentEl=document.getElementById('department');
+const doctorEl=document.getElementById('doctor');
+const testListEl=document.getElementById('testList');
+const drugListEl=document.getElementById('drugList');
+const diseaseCatalogEl=document.getElementById('diseaseCatalog');
+const resultBox=document.getElementById('resultBox');
+
+function init(){
+  departments.forEach(d=>departmentEl.innerHTML+=`<option>${d}</option>`);
+  Object.keys(doctorInfo).forEach(d=>doctorEl.innerHTML+=`<option class="tooltip" data-tip='Specjalizacja: ${doctorInfo[d]}'>${d}</option>`);
+  tests.forEach(t=>testListEl.innerHTML+=`<label><input type=checkbox data-test="${t}"/> ${t}</label>`);
+  drugs.forEach(d=>drugListEl.innerHTML+=`<label class="tooltip" data-tip='${d.info}'><input type=checkbox data-drug="${d.name}"/> ${d.name}</label>`);
+  diseaseCatalog.forEach(dc=>diseaseCatalogEl.innerHTML+=`<option>${dc.name}</option>`);
+  renderCase();
+}
+
+function renderCase(){
+  const c=cases[idx]; patientNameEl.textContent=c.name; patientAgeEl.textContent="Wiek: "+c.age; symptomsEl.textContent=c.symptoms; caseIdEl.textContent="#"+c.id;
+  selectedTests=new Set(); selectedDrugs=new Set();
+  testListEl.querySelectorAll('input').forEach(i=>i.checked=false);
+  drugListEl.querySelectorAll('input').forEach(i=>i.checked=false);
+  departmentEl.value=""; doctorEl.value="";
+  resultBox.textContent="Wciśnij ‘Sprawdź’.";
+}
+
+document.getElementById('applyDisease').onclick=function(){
+  const d=diseaseCatalog.find(x=>x.name===diseaseCatalogEl.value);
+  if(!d)return;
+  selectedDrugs=new Set(d.drugs); selectedTests=new Set(d.tests);
+  drugListEl.querySelectorAll('input').forEach(i=>i.checked=selectedDrugs.has(i.dataset.drug));
+  testListEl.querySelectorAll('input').forEach(i=>i.checked=selectedTests.has(i.dataset.test));
+  resultBox.textContent="Sugestia zastosowana.";
+};
+
+testListEl.onchange=e=>{if(e.target.dataset.test){if(e.target.checked)selectedTests.add(e.target.dataset.test);else selectedTests.delete(e.target.dataset.test);}};
+drugListEl.onchange=e=>{if(e.target.dataset.drug){if(e.target.checked)selectedDrugs.add(e.target.dataset.drug);else selectedDrugs.delete(e.target.dataset.drug);}};
+
+document.getElementById('checkBtn').onclick=function(){
+  const c=cases[idx];
+  const okDept=departmentEl.value===c.correctDepartment;
+  const okDoc=doctorEl.value===c.correctDoctor;
+  const okTests=c.correctTests.every(t=>selectedTests.has(t))&&selectedTests.size===c.correctTests.length;
+  const okDrugs=c.correctDrugs.every(d=>selectedDrugs.has(d))&&selectedDrugs.size===c.correctDrugs.length;
+  resultBox.innerHTML=`Oddział: <b>${okDept?"✔":"✖"}</b><br>Lekarz: <b>${okDoc?"✔":"✖"}</b><br>Badania: <b>${okTests?"✔":"✖"}</b><br>Leki: <b>${okDrugs?"✔":"✖"}</b>`;
+};
+
+document.getElementById('nextBtn').onclick=function(){idx=(idx+1)%cases.length;renderCase();};
+document.getElementById('revealBtn').onclick=function(){alert("Diagnoza: "+cases[idx].diagnosis);};
+init();
+</script>
+</body>
+</html>
