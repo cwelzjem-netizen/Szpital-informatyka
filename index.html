@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>System Medyczny - Szpital PHP+SQL</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/@remix-run/router@1.15.3/dist/router.umd.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-router@6.22.3/dist/umd/react-router.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-router-dom@6.22.3/dist/umd/react-router-dom.production.min.js"></script>
+    <script src="https://unpkg.com/lucide-react@latest/dist/umd/lucide-react.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+      body { font-family: 'Inter', sans-serif; }
+      .animacja-wejscia { animation: fadeIn 0.5s ease-out; }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { HashRouter, Routes, Route, useNavigate, useLocation, useParams, Navigate } = ReactRouterDOM;
+        
+        const Icons = window.lucideReact;
+        const { Activity, Users, LayoutDashboard, RotateCcw, ChevronRight, CheckCircle2, Clock, CheckCircle, AlertCircle, ClipboardList, ArrowLeft, User, Clipboard, Stethoscope, TestTube, Pill, Check } = Icons || {};
+
+        // === KONTEKST DANYCH (ZAMIAST KLASY) ===
+        // Pobieramy dane z api_init.php przy starcie
+        const uzyjDanychSzpitala = () => {
+            const [dane, setDane] = useState({
+                oddzialy: [], lekarze: [], pacjenci: [], badania: [], leki: [], zaladowane: false
+            });
+
+            useEffect(() => {
+                fetch('api_init.php')
+                    .then(res => res.json())
+                    .then(json => {
+                        if(json.error) { alert("Błąd bazy: " + json.error); return; }
+                        setDane({ ...json, zaladowane: true });
+                    })
+                    .catch(err => console.error("Błąd połączenia z API:", err));
+            }, []);
+
+            return dane;
+        };
+
+        // Zapisywanie lokalne wyniku (tylko wynik punktowy, reszta w bazie SQL to read-only w tym projekcie)
+        const uzyjStanuGry = () => {
+            const [stan, setStan] = useState(() => {
+                const s = localStorage.getItem('szpital_sql_state');
+                return s ? JSON.parse(s) : { wyleczeniPacjenciIds: [], wynikPunktowy: 0 };
+            });
+
+            const zapiszSukces = (pacjentId, punkty) => {
+                setStan(prev => {
+                    if (prev.wyleczeniPacjenciIds.includes(pacjentId)) return prev;
+                    const nowyStan = {
+                        wyleczeniPacjenciIds: [...prev.wyleczeniPacjenciIds, parseInt(pacjentId)],
+                        wynikPunktowy: prev.wynikPunktowy + punkty
+                    };
+                    localStorage.setItem('szpital_sql_state', JSON.stringify(nowyStan));
+                    return nowyStan;
+                });
+            };
+
+            const resetuj = () => {
+                localStorage.removeItem('szpital_sql_state');
+                window.location.reload();
+            };
+
+            return { stan, zapiszSukces, resetuj };
+        };
+
+        // === KOMPONENTY ===
+
+        const Szablon = ({ children, wynik, onReset }) => {
+            const navigate = useNavigate();
+            const location = useLocation();
+            return (
+                <div className="min-h-screen flex bg-slate-50">
+                    <aside className="w-64 bg-white border-r border-slate-200 fixed h-full hidden md:flex flex-col">
+                        <div className="p-6 border-b border-slate-100">
+                            <div className="flex items-center gap-2 text-blue-700">
+                                <Activity size={28} />
+                                <span className="text-xl font-bold">Szpital<span className="text-slate-800">SQL</span></span>
+                            </div>
+                        </div>
+                        <nav className="p-4 flex-1">
+                            <div onClick={() => navigate('/')} className="cursor-pointer p-3 hover:bg-slate-100 rounded-xl flex gap-3 text-slate-600 font-medium"><LayoutDashboard size={20}/> Pulpit</div>
+                            <div onClick={() => navigate('/lista-pacjentow')} className="cursor-pointer p-3 hover:bg-slate-100 rounded-xl flex gap-3 text-slate-600 font-medium"><Users size={20}/> Pacjenci</div>
+                        </nav>
+                        <div className="p-6 border-t">
+                            <div className="bg-slate-100 p-4 rounded-xl mb-4">
+                                <p className="text-xs text-slate-400 font-bold uppercase">Wynik</p>
+                                <span className="text-2xl font-bold">{wynik} PKT</span>
+                            </div>
+                            <button onClick={onReset} className="text-xs text-red-400 font-bold flex gap-2"><RotateCcw size={14}/> RESETUJ</button>
+                        </div>
+                    </aside>
+                    <main className="flex-1 md:ml-64 p-8 overflow-y-auto max-w-5xl mx-auto">{children}</main>
+                </div>
+            );
+        };
+
+        const Pulpit = ({ dane, stan }) => {
+            const navigate = useNavigate();
+            if (!dane.zaladowane) return <div>Łączenie z bazą PostgreSQL...</div>;
+            
+            const wszyscy = dane.pacjenci.length;
+            const wyleczeni = stan.wyleczeniPacjenciIds.length;
+            const procent = wszyscy > 0 ? Math.round((wyleczeni / wszyscy) * 100) : 0;
+
+            return (
+                <div className="space-y-8 animacja-wejscia">
+                    <h1 className="text-3xl font-bold">Centrum Dowodzenia (PHP Backend)</h1>
+                    <div className="grid grid-cols-3 gap-6">
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border"><p className="text-slate-500">Baza Pacjentów</p><p className="text-2xl font-bold">{wszyscy}</p></div>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border"><p className="text-slate-500">Wyleczeni</p><p className="text-2xl font-bold">{wyleczeni}</p></div>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border"><p className="text-slate-500">Postęp</p><p className="text-2xl font-bold text-blue-600">{procent}%</p></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ListaPacjentow = ({ dane, wyleczeniIds }) => {
+            const navigate = useNavigate();
+            if (!dane.zaladowane) return <div>Ładowanie danych...</div>;
+
+            return (
+                <div className="space-y-6 animacja-wejscia">
+                    <h1 className="text-3xl font-bold">Pacjenci w systemie</h1>
+                    <div className="grid gap-4">
+                        {dane.pacjenci.map((pacjent) => {
+                            const jestWyleczony = wyleczeniIds.includes(pacjent.id);
+                            return (
+                                <div key={pacjent.id} onClick={() => !jestWyleczony && navigate(`/gabinet/${pacjent.id}`)}
+                                     className={`bg-white p-6 rounded-2xl border flex justify-between items-center ${jestWyleczony ? 'opacity-60 bg-emerald-50' : 'cursor-pointer hover:shadow-md'}`}>
+                                    <div>
+                                        <h3 className="font-bold text-lg">{pacjent.imie} {pacjent.nazwisko}</h3>
+                                        <p className="text-slate-500 text-sm">{pacjent.objawy}</p>
+                                    </div>
+                                    {jestWyleczony ? <CheckCircle2 className="text-emerald-600"/> : <ChevronRight className="text-slate-400"/>}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        const Gabinet = ({ dane, naSukces, wyleczeniIds }) => {
+            const { id } = useParams();
+            const navigate = useNavigate();
+            const pacjentId = parseInt(id);
+            const pacjent = dane.pacjenci.find(p => p.id === pacjentId);
+
+            const [form, setForm] = useState({ oddzial: '', lekarz: '', badania: [], leki: [], diagnoza: '' });
+            const [wynik, setWynik] = useState(null);
+
+            // Filtrowanie lekarzy po oddziale
+            const lekarzeFiltrowani = dane.lekarze.filter(l => l.oddzial_id == form.oddzial);
+
+            const toggleItem = (id, field) => {
+                setForm(prev => ({
+                    ...prev,
+                    [field]: prev[field].includes(id) ? prev[field].filter(x => x !== id) : [...prev[field], id]
+                }));
+            };
+
+            const wyslijDoAPI = async () => {
+                try {
+                    const res = await fetch('api_check.php', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            pacjent_id: pacjentId,
+                            oddzial_id: form.oddzial,
+                            lekarz_id: form. lekarz,
+                            badania_ids: form.badania,
+                            leki_ids: form.leki,
+                            diagnoza_tekst: form.diagnoza
+                        })
+                    });
+                    const json = await res.json();
+                    setWynik(json);
+                    if (json.sukces) {
+                        naSukces(pacjentId, json.punkty);
+                        setTimeout(() => navigate('/lista-pacjentow'), 3000);
+                    }
+                } catch (err) {
+                    alert("Błąd serwera: " + err);
+                }
+            };
+
+            if (!dane.zaladowane || !pacjent) return <div>Ładowanie...</div>;
+            if (wyleczeniIds.includes(pacjentId)) return <Navigate to="/lista-pacjentow" />;
+
+            if (wynik) {
+                return (
+                    <div className="max-w-xl mx-auto bg-white p-8 rounded-3xl border text-center mt-10">
+                        <h2 className={`text-2xl font-bold mb-4 ${wynik.sukces ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {wynik.sukces ? 'Sukces!' : 'Błąd w sztuce'}
+                        </h2>
+                        <p>Zdobyte punkty: {wynik.punkty}</p>
+                        <div className="text-left bg-slate-50 p-4 rounded-xl mt-4 text-sm text-red-500 space-y-1">
+                            {wynik.wiadomosci.map((msg, i) => <div key={i}>• {msg}</div>)}
+                        </div>
+                        {!wynik.sukces && <button onClick={() => setWynik(null)} className="mt-6 px-6 py-2 border rounded-xl">Popraw</button>}
+                    </div>
+                );
+            }
+
+            return (
+                <div className="pb-20">
+                    <button onClick={() => navigate('/lista-pacjentow')} className="mb-6 flex gap-2 items-center text-slate-500"><ArrowLeft size={18}/> Powrót</button>
+                    <div className="grid lg:grid-cols-3 gap-8">
+                        <div className="lg:col-span-1">
+                            <div className="bg-white p-6 rounded-xl border sticky top-4">
+                                <h2 className="font-bold text-xl">{pacjent.imie} {pacjent.nazwisko}</h2>
+                                <p className="mt-4 bg-amber-50 p-3 rounded text-amber-900 text-sm border border-amber-100">{pacjent.objawy}</p>
+                            </div>
+                        </div>
+                        <div className="lg:col-span-2 space-y-6">
+                            {/* Formularze */}
+                            <div className="bg-white p-6 rounded-xl border">
+                                <label className="block font-bold mb-2">Oddział</label>
+                                <select className="w-full p-3 border rounded" onChange={e => setForm({...form, oddzial: e.target.value, lekarz: ''})}>
+                                    <option value="">Wybierz...</option>
+                                    {dane.oddzialy.map(o => <option key={o.id} value={o.id}>{o.nazwa}</option>)}
+                                </select>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-xl border">
+                                <label className="block font-bold mb-2">Lekarz</label>
+                                <select className="w-full p-3 border rounded" disabled={!form.oddzial} onChange={e => setForm({...form, lekarz: e.target.value})}>
+                                    <option value="">Wybierz...</option>
+                                    {lekarzeFiltrowani.map(l => <option key={l.id} value={l.id}>{l.imie} {l.nazwisko} ({l.specjalizacja})</option>)}
+                                </select>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-xl border">
+                                <label className="block font-bold mb-2">Badania</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {dane.badania.map(b => (
+                                        <button key={b.id} onClick={() => toggleItem(b.id, 'badania')} 
+                                            className={`p-2 text-sm border rounded text-left ${form.badania.includes(b.id) ? 'bg-blue-100 border-blue-400' : ''}`}>
+                                            {b.nazwa}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-xl border">
+                                <label className="block font-bold mb-2">Leki</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {dane.leki.map(l => (
+                                        <button key={l.id} onClick={() => toggleItem(l.id, 'leki')} 
+                                            className={`p-2 text-sm border rounded text-left ${form.leki.includes(l.id) ? 'bg-red-100 border-red-400' : ''}`}>
+                                            {l.nazwa}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-xl border">
+                                <label className="block font-bold mb-2">Diagnoza</label>
+                                <input className="w-full p-3 border rounded" placeholder="np. Zapalenie płuc" onChange={e => setForm({...form, diagnoza: e.target.value})} />
+                            </div>
+
+                            <button onClick={wyslijDoAPI} className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold hover:bg-slate-800 transition">Zatwierdź diagnozę</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const Aplikacja = () => {
+            const dane = uzyjDanychSzpitala();
+            const { stan, zapiszSukces, resetuj } = uzyjStanuGry();
+
+            return (
+                <HashRouter>
+                    <Szablon wynik={stan.wynikPunktowy} onReset={resetuj}>
+                        <Routes>
+                            <Route path="/" element={<Pulpit dane={dane} stan={stan} />} />
+                            <Route path="/lista-pacjentow" element={<ListaPacjentow dane={dane} wyleczeniIds={stan.wyleczeniPacjenciIds} />} />
+                            <Route path="/gabinet/:id" element={<Gabinet dane={dane} naSukces={zapiszSukces} wyleczeniIds={stan.wyleczeniPacjenciIds} />} />
+                            <Route path="*" element={<Navigate to="/" replace />} />
+                        </Routes>
+                    </Szablon>
+                </HashRouter>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<Aplikacja />);
+    </script>
+</body>
+</html>
